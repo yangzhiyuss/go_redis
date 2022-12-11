@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 const (
@@ -233,11 +234,11 @@ func (d *Dict) Resize() int {
 	if minimal < DICT_HT_INITIAL_SIZE {
 		minimal = DICT_HT_INITIAL_SIZE
 	}
-	return d.Expand(minimal)
+	return d.expand(minimal)
 }
 
 /* Expand or create the hash table*/
-func (d *Dict) Expand(size uint64) int {
+func (d *Dict) expand(size uint64) int {
 	realSize := d.nextPower(size)
 	if d.IsRehashing() || d.Ht[0].Used > size {
 		return DICT_ERR
@@ -247,7 +248,8 @@ func (d *Dict) Expand(size uint64) int {
 		Table:    make([]*DicEntry, realSize),
 		Size:     realSize,
 		SizeMask: realSize - 1,
-		Used:     0}
+		Used:     0,
+	}
 
 	if d.Ht[0].Table == nil {
 		d.Ht[0] = n
@@ -275,7 +277,7 @@ func (d *Dict) Expand(size uint64) int {
  *
  * T = O(N)
  */
-func (d *Dict) Rehash(n int) int {
+func (d *Dict) rehash(n int) int {
 	if !d.IsRehashing() {
 		return 0
 	}
@@ -288,24 +290,174 @@ func (d *Dict) Rehash(n int) int {
 			return 0
 		}
 
+		//note that rehashidx can't overflower
 		if uint32(d.Ht[0].Size) > uint32(d.ReHashIdx) {
 			panic(-1)
 		}
 
+		// skip the elem is nil
 		for d.Ht[0].Table[d.ReHashIdx] == nil {
 			d.ReHashIdx++
 		}
 
+		// point the head
 		de := d.Ht[0].Table[d.ReHashIdx]
 		for de != nil {
 			nextDe := de.Next
-			// TODO
-
+			//get the index
+			h := d.HashKey(de.Key) & uint32(d.Ht[1].SizeMask)
+			//list header insert
+			de.Next = d.Ht[1].Table[h]
+			d.Ht[1].Table[h] = de
 			de = nextDe
 		}
-
+		d.Ht[0].Table[d.ReHashIdx] = nil
+		d.ReHashIdx++
 	}
 	return 1
+}
+
+func timeInMilliseconds() int64 {
+	return time.Now().UnixMilli()
+}
+
+/* rehash for an amount of time between ms millisecond and ms+1 millisecond */
+func (d *Dict) RehashMilliseconds(ms int) int {
+	start := time.Now().UnixMilli()
+	rehashes := 0
+
+	for d.rehash(100) == 1 {
+		rehashes += 100
+		if timeInMilliseconds() - start > int64(ms) {
+			break
+		}
+	}
+	return rehashes
+}
+
+/* This function performs just a step of rehashing, and only if there are
+ * no safe iterators bound to our hash table. When we have iterators in the
+ * middle of a rehashing we can't mess with the two hash tables otherwise
+ * some element can be missed or duplicated.
+ *
+ * 在字典不存在安全迭代器的情况下，对字典进行单步 rehash 。
+ *
+ * 字典有安全迭代器的情况下不能进行 rehash ，
+ * 因为两种不同的迭代和修改操作可能会弄乱字典。
+ *
+ * This function is called by common lookup or update operations in the
+ * dictionary so that the hash table automatically migrates from H1 to H2
+ * while it is actively used.
+ *
+ * 这个函数被多个通用的查找、更新操作调用，
+ * 它可以让字典在被使用的同时进行 rehash 。
+ *
+ * T = O(1)
+ */
+func (d *Dict) rehashStep()  {
+	if d.Iterators == 0 {
+		d.rehash(1)
+	}
+}
+
+/* Add an element to the target hash table */
+func (d *Dict) Add(key interface{}, val interface{}) int {
+	entry := d.addRaw(key)
+
+	if entry == nil {
+		return DICT_ERR
+	}
+
+	d.SetVal(entry, val)
+
+	return DICT_OK
+}
+
+/*
+ * 尝试将键插入到字典中
+ *
+ * 如果键已经在字典存在，那么返回 NULL
+ *
+ * 如果键不存在，那么程序创建新的哈希节点，
+ * 将节点和键关联，并插入到字典，然后返回节点本身。
+ *
+ * T = O(N)
+ */
+func (d *Dict) addRaw(key interface{}) *DicEntry {
+	//进行单步rehash
+	if d.IsRehashing() {
+		d.rehashStep()
+	}
+	//获取key所在的位置
+	index := d.keyIndex(key)
+	if index == -1 {
+		return nil
+	}
+
+	//entry插入hash表
+	var ht *DictHt
+	if d.IsRehashing() {
+		ht = &d.Ht[1]
+	} else {
+		ht = &d.Ht[0]
+	}
+
+	entry := new(DicEntry)
+	entry.Next = ht.Table[index]
+	ht.Table[index] = entry
+	ht.Used++
+	d.SetKey(entry, key)
+	return entry
+}
+
+/*  如果键值对为全新添加，那么返回 1 。
+ * 如果键值对是通过对原有的键值对更新得来的，那么返回 0 。
+ */
+func (d *Dict) Replace(key interface{}, value interface{}) int {
+	if d.Add(key, value) == DICT_OK {
+		return 1
+	}
+	entry := d.Find(key)
+	d.SetVal(entry, value)
+	return 0
+}
+
+func (d *Dict) ReplaceRaw(key interface{}) *DicEntry {
+	entry := d.Find(key)
+
+	if entry != nil {
+		return entry
+	} else {
+		return d.addRaw(key)
+	}
+}
+
+/* 查找某个元素的位置*/
+func (d *Dict) Find(key interface{}) *DicEntry {
+	if d.Ht[0].Size == 0 {
+		return nil
+	}
+
+	if d.IsRehashing() {
+		d.rehashStep()
+	}
+
+	h := d.HashKey(key)
+	for table := 0; table <= 1; table++ {
+		idx := h & uint32(d.Ht[table].SizeMask)
+		he := d.Ht[table].Table[idx]
+		for he != nil {
+			if d.CompareKeys(key, he.Key) {
+				return he
+			}
+			he = he.Next
+		}
+		if (!d.IsRehashing()) {
+			return nil
+		}
+	}
+
+	return nil
 }
 
 /* ----------------------private Function---------------------*/
@@ -317,11 +469,11 @@ func (d *Dict) expandIfNeeded() int {
 	}
 
 	if d.Ht[0].Size == 0 {
-		return d.Expand(DICT_HT_INITIAL_SIZE)
+		return d.expand(DICT_HT_INITIAL_SIZE)
 	}
 
 	if d.Ht[0].Used >= d.Ht[0].Size && (dict_can_resize > 0 || d.Ht[0].Used/d.Ht[0].Size > uint64(dict_force_resize_ratio)) {
-		return d.Expand(d.Ht[0].Used * 2)
+		return d.expand(d.Ht[0].Used * 2)
 	}
 
 	return DICT_OK
@@ -350,7 +502,7 @@ func (d *Dict) nextPower(size uint64) uint64 {
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table.
  * T = O(N)*/
-func (d *Dict) keyIndex(key interface{}) int {
+func (d *Dict) keyIndex(key interface{}) int64 {
 	var idx uint32
 	if d.expandIfNeeded() == DICT_ERR {
 		return -1
@@ -371,5 +523,5 @@ func (d *Dict) keyIndex(key interface{}) int {
 			break
 		}
 	}
-	return int(idx)
+	return int64(idx)
 }
