@@ -422,6 +422,17 @@ func (d *Dict) Replace(key interface{}, value interface{}) int {
 	return 0
 }
 
+/*
+ * AddRaw() 根据给定 key 释放存在，执行以下动作：
+ *
+ * 1) key 已经存在，返回包含该 key 的字典节点
+ * 2) key 不存在，那么将 key 添加到字典
+ *
+ * 不论发生以上的哪一种情况，
+ * dictAddRaw() 都总是返回包含给定 key 的字典节点。
+ *
+ * T = O(N)
+ */
 func (d *Dict) ReplaceRaw(key interface{}) *DicEntry {
 	entry := d.Find(key)
 
