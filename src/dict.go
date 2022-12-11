@@ -328,7 +328,7 @@ func (d *Dict) RehashMilliseconds(ms int) int {
 
 	for d.rehash(100) == 1 {
 		rehashes += 100
-		if timeInMilliseconds() - start > int64(ms) {
+		if timeInMilliseconds()-start > int64(ms) {
 			break
 		}
 	}
@@ -354,7 +354,7 @@ func (d *Dict) RehashMilliseconds(ms int) int {
  *
  * T = O(1)
  */
-func (d *Dict) rehashStep()  {
+func (d *Dict) rehashStep() {
 	if d.Iterators == 0 {
 		d.rehash(1)
 	}
@@ -452,7 +452,7 @@ func (d *Dict) Find(key interface{}) *DicEntry {
 			}
 			he = he.Next
 		}
-		if (!d.IsRehashing()) {
+		if !d.IsRehashing() {
 			return nil
 		}
 	}
