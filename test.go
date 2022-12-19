@@ -1,32 +1,41 @@
 package main
+// interface 的实现
 
-import "fmt"
+import (
+	"fmt"
+	"math/rand"
+	"time"
+)
 
-type demo struct {
-	aaa string
-	bbb string
+type IUser interface {
+	SetName(string)
+	GetName() string
+}
+
+type User struct {
+	name string
+}
+
+
+func (self User) GetName() string {
+	return self.name
+}
+
+func (self *User) SetName(name string) {
+	self.name = name
 }
 
 func main() {
-	key := demo{
-		aaa: "cccc",
-		bbb: "dddd",
-	}
-	var value interface{}
-	value = key
-	data := []byte(fmt.Sprintf("%v", value.(interface{})))
-	for _, v := range data {
-		print(v)
-	}
-	println()
-	key2 := demo{
-		aaa: "cccc",
-		bbb: "dddd",
+	var i IUser
+	i = &User{}
+	i.SetName("wxnacy")
+	fmt.Println(i.GetName())
+	// wxnacy
+
+	for true {
+		rand.Seed(time.Now().UnixNano())
+		fmt.Println(rand.Int())
+		time.Sleep(10 *time.Second)
 	}
 
-	value = key2
-	data = []byte(fmt.Sprintf("%v", value.(interface{})))
-	for _, v := range data {
-		print(v)
-	}
 }

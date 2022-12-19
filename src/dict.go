@@ -309,6 +309,11 @@ func (d *Dict) rehash(n int) int {
 			//list header insert
 			de.Next = d.Ht[1].Table[h]
 			d.Ht[1].Table[h] = de
+
+			//插入节点到新的hash表
+			d.Ht[0].Used--
+			d.Ht[1].Used++
+
 			de = nextDe
 		}
 		d.Ht[0].Table[d.ReHashIdx] = nil
@@ -417,7 +422,7 @@ func (d *Dict) Replace(key interface{}, value interface{}) int {
 	if d.Add(key, value) == DICT_OK {
 		return 1
 	}
-	entry := d.Find(key)
+	entry := d.find(key)
 	d.SetVal(entry, value)
 	return 0
 }
@@ -429,12 +434,12 @@ func (d *Dict) Replace(key interface{}, value interface{}) int {
  * 2) key 不存在，那么将 key 添加到字典
  *
  * 不论发生以上的哪一种情况，
- * dictAddRaw() 都总是返回包含给定 key 的字典节点。
+ * AddRaw() 都总是返回包含给定 key 的字典节点。
  *
  * T = O(N)
  */
 func (d *Dict) ReplaceRaw(key interface{}) *DicEntry {
-	entry := d.Find(key)
+	entry := d.find(key)
 
 	if entry != nil {
 		return entry
@@ -443,8 +448,86 @@ func (d *Dict) ReplaceRaw(key interface{}) *DicEntry {
 	}
 }
 
+/* Search and remove an element */
+/*
+ * 查找并删除包含给定键的节点
+ *
+ * 参数 nofree 决定是否调用键和值的释放函数
+ * 0 表示调用，1 表示不调用
+ *
+ * 找到并成功删除返回 DICT_OK ，没找到则返回 DICT_ERR
+ *
+ * T = O(1)
+ */
+func (d *Dict) Delete(key interface{}) int {
+	if d.Ht[0].Size == 0 {
+		return DICT_ERR
+	}
+
+	if d.IsRehashing() {
+		d.rehashStep()
+	}
+
+	h := d.HashKey(key)
+
+	for table := 0; table <= 1; table++ {
+		idx := h & uint32(d.Ht[table].SizeMask)
+		he := d.Ht[table].Table[idx]
+		var preHe *DicEntry = nil
+		for he != nil {
+			if d.CompareKeys(key, he.Key) {
+				if preHe != nil {
+					preHe.Next = he.Next
+				} else {
+					d.Ht[table].Table[idx] = he.Next
+				}
+				he.Next = nil
+				d.Ht[table].Used--
+				return DICT_OK
+			}
+			preHe = he
+			he = he.Next
+		}
+		if !d.IsRehashing() {
+			break
+		}
+	}
+	return DICT_ERR
+}
+
+/*
+ * 获取包含给定键的节点的值
+ *
+ * 如果节点不为空，返回节点的值
+ * 否则返回 NULL
+ *
+ * T = O(1)
+ */
+func (d *Dict) FetchValue(key interface{}) interface{} {
+	he := d.find(key)
+	if he == nil {
+		return nil
+	} else {
+		return he.Value
+	}
+}
+
+/* A fingerprint is a 64 bit number that represents the state of the dictionary
+ * at a given time, it's just a few dict properties xored together.
+ * When an unsafe iterator is initialized, we get the dict fingerprint, and check
+ * the fingerprint again when the iterator is released.
+ * If the two fingerprints are different it means that the user of the iterator
+ * performed forbidden operations against the dictionary while iterating. */
+func (d *Dict) Fingerprint()  {
+	integers := make([]int64, 6)
+	hash := int64(0)
+
+	integers[0] =
+}
+
+
 /* 查找某个元素的位置*/
-func (d *Dict) Find(key interface{}) *DicEntry {
+func (d *Dict) find(key interface{}) *DicEntry {
 	if d.Ht[0].Size == 0 {
 		return nil
 	}
@@ -536,3 +619,4 @@ func (d *Dict) keyIndex(key interface{}) int64 {
 	}
 	return int64(idx)
 }
+
