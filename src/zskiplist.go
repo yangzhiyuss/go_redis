@@ -21,6 +21,8 @@ type zSkipListLevel struct {
 type zSkipListNode struct {
 	//分值
 	score float64
+	//
+	value interface{}
 	//后退指针
 	backward *zSkipListNode
 	//层
